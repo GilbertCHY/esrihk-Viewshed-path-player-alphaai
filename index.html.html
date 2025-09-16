@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>EsriHK • Viewshed Path Player (v3-boost)</title>
+
+<!-- ArcGIS JS API & theme -->
+<link rel="stylesheet" href="https://js.arcgis.com/4.32/esri/themes/light/main.css"/>
+<script src="https://js.arcgis.com/4.32/"></script>
+
+<!-- Calcite & map-components -->
+<script type="module" src="https://js.arcgis.com/calcite-components/3.0.3/calcite.esm.js"></script>
+<script type="module" src="https://js.arcgis.com/map-components/4.32/arcgis-map-components.esm.js"></script>
+
+<style>
+html,body,#sceneview{margin:0;padding:0;width:100%;height:100%}
+arcgis-scene{position:absolute;inset:0}
+
+header{background:#004874;color:#ffffff91;font:700 1.25rem/1.2 system-ui;padding:.75rem 1rem;z-index:1000}
+
+/* preview */
+#previewContainer{pointer-events:none;position:absolute;bottom:25px;right:10px;width:650px;height:350px;
+                  border:3px solid dimgrey;background:#ffffff8a}
+                  
+/* tool panel */
+#toolPanel{position:absolute;bottom:50px;left:10px;width:310px;padding-inline:5px}
+.spacer{margin-top:.5rem}
+
+/* coordinate panel */
+#coordPanel{position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 380px;
+  padding: 10px;
+  background: rgba(20, 20, 24, 0.393);
+  color: #ffffff;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.473);
+  font-family: 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+  font-size: 13.5px;
+  line-height: 1.4;
+  z-index: 1000;
+}
+#coordPanel h3{margin:0 0 6px;font-size:16px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:#4687bd}
+#coordPanel .row{display:flex;justify-content:space-between;margin:10px 0;font-size:16px;font-family:monospace}
+
+#topCenterLogo {
+  position: absolute;
+  top: 0px;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 40px; /* adjust size as needed */
+  z-index: 1100;
+  opacity: 0.95;
+  background: rgba(34, 82, 139, 0.564);
+  padding: 2px 8000px;
+  border-radius: 6px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+
+
+
+
+.slider-row{display:flex;align-items:center;gap:.5rem}
+.slider-row calcite-slider{flex:1}
+.slider-caption{white-space:nowrap;font:14px/1.3 system-ui,sans-serif}
+calcite-input[readonly]{background:#f5f5f579}
+
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button{display:none}
+input[type=number]{-moz-appearance:textfield}
+
+/* joystick */
+#headingDial{width:110px;height:110px;border:2px solid #555;border-radius:50%;margin:auto;position:relative;cursor:grab}
+#headingDot{width:14px;height:14px;border-radius:50%;background:#0078d4;position:absolute;left:50%;top:5%;
+            transform:translate(-50%,-50%);pointer-events:none;transition:left .05s linear,top .05s linear}
+
+/* daylight + toggles */
+#previewToggle,#panelToggle{position:absolute;z-index:1100}
+#panelToggle {bottom:12px;left:10px}
+#previewToggle{bottom:12px;left:90px}
+</style>
+</head>
+
+<img src="https://raw.githubusercontent.com/GilbertCHY/EsriHK-Viewshed-webapp/refs/heads/main/Esri_China%20(Hong%20Kong)_Emblem_1CRev.png" alt="Company Logo" id="topCenterLogo">
+
+<body>
+<header>Esri Hong Kong • Viewshed Path Player</header>
+
+<!-- MAIN SCENE -->
+<arcgis-scene id="sceneview" item-id="70c8be3f033e4ebf8b4bd566f3cd4a9c">
+  <arcgis-zoom position="top-right"></arcgis-zoom>
+  <arcgis-navigation-toggle position="top-right"></arcgis-navigation-toggle>
+  <arcgis-compass position="top-right"></arcgis-compass>
+  <arcgis-expand position="top-right" mode="floating"><arcgis-search position="top-right"></arcgis-search></arcgis-expand>
+  <arcgis-expand position="top-right" mode="floating"><arcgis-layer-list position="top-leading" show-heading></arcgis-layer-list></arcgis-expand>
+  <arcgis-expand position="top-right" mode="floating"><arcgis-weather position="bottom-right"></arcgis-weather></arcgis-expand>
+  <arcgis-expand position="top-right" mode="floating"><arcgis-daylight position="bottom-right"></arcgis-daylight></arcgis-expand>
+</arcgis-scene>
+
+<!-- daylight & toggles -->
+<calcite-button id="panelToggle"   scale="s">Hide Tools</calcite-button>
+<calcite-button id="previewToggle" scale="s">Hide Preview</calcite-button>
+
+<!-- preview -->
+<div id="previewContainer"></div>
+
+
+
+<!-- TOOL PANEL -->
+<calcite-card id="toolPanel">
+  <calcite-button id="playBtn" width="full" appearance="solid" color="green" disabled>▶ Play path</calcite-button>
+
+  <div class="spacer"></div>
+  <calcite-label layout="inline">Observer Z (m)
+    <calcite-input id="zBox" type="number" readonly number-button-type="none"></calcite-input>
+  </calcite-label>
+
+  <div class="spacer"></div>
+  <calcite-label layout="inline">Far distance (m)
+    <calcite-input id="farIn" type="number" value="500" step="100"></calcite-input>
+  </calcite-label>
+
+  <calcite-label layout="inline" class="spacer">Speed (km/h)
+    <calcite-input id="stepIn" type="number" value="5" step="1" min="1"></calcite-input>
+  </calcite-label>
+
+  <calcite-label layout="inline">Path length (m)
+    <calcite-input id="lenBox" type="text" value="—" readonly></calcite-input>
+  </calcite-label>
+  <calcite-label layout="inline">Travel time
+    <calcite-input id="timeBox" type="text" value="—" readonly></calcite-input>
+  </calcite-label>
+
+  <!-- view parameters -->
+  <div class="spacer slider-row">
+    <span class="slider-caption">Tilt (<span id="tiltD">90</span>°)</span>
+    <calcite-slider id="tiltS" min="0" max="90" step="1" value="90"></calcite-slider>
+  </div>
+
+  <div class="spacer">
+    <span class="slider-caption" style="display:block;text-align:center">
+      Heading (<span id="headD">0</span>°)
+    </span>
+    <div id="headingDial"><div id="headingDot"></div></div>
+  </div>
+
+  <div class="spacer slider-row">
+    <span class="slider-caption">Horizontal FOV (<span id="hFOVD">85</span>°)</span>
+    <calcite-slider id="hFOVS" min="1" max="120" step="1" value="85"></calcite-slider>
+  </div>
+  <div class="slider-row">
+    <span class="slider-caption">Vertical FOV (<span id="vFOVD">60</span>°)</span>
+    <calcite-slider id="vFOVS" min="1" max="90" step="1" value="60"></calcite-slider>
+  </div>
+
+  <!-- NEW playback slider -->
+  <div class="spacer slider-row">
+    <span class="slider-caption">Playback ×<span id="boostD">100</span></span>
+    <calcite-slider id="boostS" min="1" max="400" step="1" value="100"></calcite-slider>
+  </div>
+</calcite-card>
+
+ <!-- COORDINATE PANEL -->
+  <div id="coordPanel">
+    <h3>Path Information</h3>
+    <div class="row"><span>Latitude</span><span id="latVal">—</span></div>
+    <div class="row"><span>Longitude</span><span id="lonVal">—</span></div>
+    <div class="row"><span>Altitude (m)</span><span id="altVal">—</span></div>
+    <div class="row"><span>Total Length (m)</span><span id="totalLen">—</span></div>
+    <div class="row"><span>Distance Traveled (m)</span><span id="travelled">—</span></div>
+  </div>
+
+
+<script>
+require([
+  "esri/config","esri/Camera","esri/views/SceneView",
+  "esri/analysis/ViewshedAnalysis","esri/analysis/Viewshed",
+  "esri/core/reactiveUtils","esri/layers/GraphicsLayer",
+  "esri/layers/FeatureLayer","esri/symbols/SimpleLineSymbol",
+  "esri/geometry/Polyline","esri/Graphic",
+  "esri/geometry/support/webMercatorUtils",
+  "esri/geometry/projection",
+  "esri/geometry/Point",
+],(
+  esriConfig,Camera,SceneView,
+  ViewshedAnalysis,Viewshed,
+  reactiveUtils,GraphicsLayer,
+  FeatureLayer,SimpleLineSymbol,
+  Polyline,Graphic,
+  webMercatorUtils,projection,Point
+)=>{
+
+/* ——— API KEY ——— */
+esriConfig.apiKey =
+  "AAPTxy8BH1VEsoebNVZXo8HurO-VFMrOe1fEQg7hf-lbGpDfdl1NFlb-myleP06sXrxavfB2YXZv1jAIhxujJuq9DQ4IoSae2b5A30XnjKhxPZwFy-E6DUS9TUpBnMKmEDYC0MU_KtVeU_egLNSz4kQP-7K3y6kwfx3UJlVwlzYk_vvrD9W1dbXn76dniubTC61N2zrRXqbJd7sMA4LdeQ-JwEqnoE4KAurxsmMBDLJ0ZQg.AT1_G5jlOju4";
+
+// existing code unchanged until frame function
+
+const frame =()=>{if(idx>=pts.length){updateSplit();stop();return;}
+  const currentPoint = new Point(pts[idx++]);
+  vs.observer = currentPoint; 
+  updateSplit();
+  updateCoordPanel(currentPoint);
+};
+
+function updateCoordPanel(point){
+  projection.load().then(()=>{
+    let wgs84 = point;
+    if(point.spatialReference && point.spatialReference.isWebMercator){
+      wgs84 = webMercatorUtils.webMercatorToGeographic(point);
+    } else if(!point.spatialReference.isWGS84){
+      wgs84 = projection.project(point,{wkid:4326});
+    }
+    document.getElementById("latVal").textContent = wgs84.y.toFixed(6);
+    document.getElementById("lonVal").textContent = wgs84.x.toFixed(6); 
+    document.getElementById("altVal").textContent = (wgs84.z||0).toFixed(2);
+
+    const total = pts.length;
+    const stepLength = playbackBoost * FRAME / 1000;
+    const travelledMeters = stepLength * idx;
+    const percent = (travelledMeters / (stepLength * total)) * 100;
+    document.getElementById("travelled").innerHTML =
+  `<span class="numVal">${travelledMeters.toFixed(1)}</span> <span class="pctVal">(${percent.toFixed(1)}%)</span>`;
+
+    document.getElementById("totalLen").textContent = (stepLength * total).toFixed(1);
+  });
+}
+
+/* DOM handles */
+const sceneEl  = document.getElementById("sceneview"),
+      playBtn  = document.getElementById("playBtn"),
+      previewBox = document.getElementById("previewContainer"),
+      toolPanel = document.getElementById("toolPanel");
+
+/* toggles */
+document.getElementById("previewToggle").onclick=()=>{
+  previewBox.style.display = previewBox.style.display==="none"?"":"none";
+  event.target.textContent = previewBox.style.display==="none"?"Show Preview":"Hide Preview";
+};
+document.getElementById("panelToggle").onclick=()=>{
+  toolPanel.style.display   = toolPanel.style.display==="none"?"":"none";
+  event.target.textContent  = toolPanel.style.display==="none"?"Show Tools":"Hide Tools";
+};
+
+/* parameter inputs */
+const stepIn=document.getElementById("stepIn"),
+      farIn=document.getElementById("farIn"),
+      tiltS=document.getElementById("tiltS"),
+      hFOVS=document.getElementById("hFOVS"), vFOVS=document.getElementById("vFOVS"),
+      hFOVD=document.getElementById("hFOVD"), vFOVD=document.getElementById("vFOVD"),
+      headD=document.getElementById("headD"), tiltD=document.getElementById("tiltD"),
+      zBox=document.getElementById("zBox"),
+      dial=document.getElementById("headingDial"), dot=document.getElementById("headingDot"),
+      lenBox=document.getElementById("lenBox"), timeBox=document.getElementById("timeBox"),
+      boostS=document.getElementById("boostS"), boostD=document.getElementById("boostD");
+
+const FRAME = 20;                               // ms per animation frame
+let   playbackBoost = +boostS.value || 20;       // playback factor
+const PATH_LAYER_ID = "6e7eb981a669485bb35823e861eb0030";
+
+sceneEl.addEventListener("arcgisViewReadyChange",()=>{
+  const view=sceneEl.view; 
+
+  /* layers */
+  const lineLayer=new GraphicsLayer(); view.map.add(lineLayer);
+  const pathLayer=new FeatureLayer({portalItem:{id:PATH_LAYER_ID},outFields:["*"]});
+  view.map.add(pathLayer);
+
+  /* analysis */
+  const vsAnal=new ViewshedAnalysis(); view.analyses.add(vsAnal);
+
+  /* state */
+  let lineG=null,vs=null,pts=[],idx=0,timer=null,state="idle";
+  let visitedG=null,remainG=null;
+
+  /* UI helpers */
+  function btnLabel(){
+    playBtn.textContent=state==="playing"?"❚❚ Pause":state==="idle"?"▶ Play path":"▶ Resume";
+    playBtn.color      =state==="playing"?"red":"green";
+    playBtn.disabled   =!lineG;
+  }
+
+window.addEventListener("keydown", (e) => {
+  // Prevent spacebar from scrolling the page
+  if (e.code === "Space" || e.key === " ") {
+    e.preventDefault();
+
+    // Only trigger if tool panel is visible and play button is enabled
+    if (
+      playBtn &&
+      !playBtn.disabled &&
+      window.getComputedStyle(toolPanel).display !== "none"
+    ) {
+      playBtn.click(); // Simulate a click
+    }
+  }
+});
+
+
+  /* view-parameter → viewshed */
+  function syncVS(){
+    if(!vs)return;
+    vs.farDistance            = +farIn.value;
+    vs.tilt                   = +tiltS.value;
+    vs.horizontalFieldOfView  = +hFOVS.value;
+    vs.verticalFieldOfView    = +vFOVS.value;
+  }
+  farIn.addEventListener("calciteInputInput",syncVS);
+  tiltS.addEventListener("calciteSliderInput",()=>{tiltD.textContent=tiltS.value; syncVS();});
+  hFOVS.addEventListener("calciteSliderInput",()=>{hFOVD.textContent=hFOVS.value; syncVS();});
+  vFOVS.addEventListener("calciteSliderInput",()=>{vFOVD.textContent=vFOVS.value; syncVS();});
+
+  /* joystick */
+  const R=50; let dragging=false;
+  function setHeading(deg){
+    if(deg<-180)deg+=360;if(deg>180)deg-=360;
+    headD.textContent=Math.round(deg);
+    if(vs)vs.heading=deg;
+    const rad=deg*Math.PI/180;
+    dot.style.left=`calc(50% + ${R*Math.sin(rad)}px)`;
+    dot.style.top =`calc(50% + ${-R*Math.cos(rad)}px)`;
+  }
+  const move=e=>{
+    const rect=dial.getBoundingClientRect(),cx=rect.left+rect.width/2,cy=rect.top+rect.height/2;
+    setHeading(Math.atan2(e.clientX-cx,cy-e.clientY)*180/Math.PI);
+  };
+  dial.addEventListener("pointerdown",e=>{dragging=true;dial.setPointerCapture(e.pointerId);move(e);});
+  dial.addEventListener("pointermove",e=>{if(dragging)move(e);});
+  ["pointerup","pointercancel"].forEach(ev=>dial.addEventListener(ev,()=>{dragging=false;}));
+
+  /* length + travel-time */
+  const pathLen=g=>g.paths.reduce((acc,p)=>
+      acc+p.slice(1).reduce((d,c,i)=>d+Math.hypot(c[0]-p[i][0],c[1]-p[i][1]),0),0);
+  function updateStats(){
+    if(!lineG){lenBox.value="—";timeBox.value="—";return;}
+    const len=pathLen(lineG.geometry); lenBox.value=len.toFixed(2);
+    const speedKPH = Math.max(+stepIn.value || 0.1, 0.1);
+    const speed = speedKPH / 3.6; // convert to m/s
+    const sec=len/speed,hh=Math.floor(sec/3600),mm=Math.floor((sec%3600)/60),ss=Math.floor(sec%60);
+    timeBox.value=`${hh?hh+" h ":""}${mm?mm+" m ":""}${ss}s`;
+  }
+  stepIn.addEventListener("calciteInputInput",updateStats);
+
+  /* boost slider → playback speed */
+  boostS.addEventListener("calciteSliderInput",()=>{
+    playbackBoost=+boostS.value; boostD.textContent=boostS.value;
+    densifyAfterBoost(true); if(vs&&pts[idx]) vs.observer=pts[idx];
+  });
+
+  /* live Z read-out */
+  reactiveUtils.watch(
+    ()=>{const v=vsAnal.viewsheds.getItemAt(0);return v?[v.observer?.z]:[null];},
+    ()=>{const v=vsAnal.viewsheds.getItemAt(0);zBox.value=v?.observer?.z?.toFixed(2)||"";},
+    {initial:true}
+  );
+
+  /* densify helpers */
+  const densify3D=(poly,step)=>{
+    const sr=poly.spatialReference,out=[];
+    poly.paths.forEach(p=>{
+      for(let i=0;i<p.length-1;i++){
+        const [ax,ay,az=0]=p[i], [bx,by,bz=0]=p[i+1],
+              dx=bx-ax,dy=by-ay,len=Math.hypot(dx,dy),n=Math.floor(len/step);
+        for(let s=0;s<=n;s++){
+          const t=s*step/len;if(t>1)continue;
+          out.push({x:ax+dx*t,y:ay+dy*t,z:az+(bz-az)*t,spatialReference:sr});
+        }
+      }
+    });
+    const last=poly.paths.at(-1).at(-1);
+    out.push({x:last[0],y:last[1],z:last[2],spatialReference:sr});
+    return out;
+  };
+  const headFrom=p=>p.length<2?0:(Math.atan2(p[1][0]-p[0][0],p[1][1]-p[0][1])*180/Math.PI+360)%360;
+
+  /* split path graphics */
+  const updateSplit=()=>{
+    if(!visitedG||!remainG)return;
+    const sr=lineG.geometry.spatialReference,
+          mk=a=>new Polyline({paths:[a.map(p=>[p.x,p.y,p.z])],spatialReference:sr,hasZ:true});
+    visitedG.geometry=idx>1            ?mk(pts.slice(0,idx)) : null;
+    remainG.geometry  =idx<pts.length-1?mk(pts.slice(idx-1)): null;
+  };
+
+  /* densify based on playback boost */
+  function densifyAfterBoost(preserveIdx=true){
+    if(!lineG)return;
+    const frac=preserveIdx&&pts.length?idx/pts.length:0;
+    const dist=playbackBoost*FRAME/1000;           // m per frame
+    pts=densify3D(lineG.geometry,dist);
+    idx=Math.min(Math.floor(frac*pts.length),pts.length-1);
+    updateSplit();
+  }
+
+  /* initialise viewshed */
+  function initVS(){
+    const first=lineG.geometry.paths[0][0];
+    vsAnal.viewsheds.removeAll();
+    vs=new Viewshed({
+      observer:{x:first[0],y:first[1],z:first[2]??0,
+                spatialReference:lineG.geometry.spatialReference}
+    });
+    setHeading(headFrom(lineG.geometry.paths[0]));
+    syncVS(); vsAnal.viewsheds.add(vs);
+  }
+
+  /* path selection */
+  function usePath(f){
+    stop(); lineLayer.removeAll(); lineG=f.clone();
+    const sr=lineG.geometry.spatialReference;
+    visitedG = new Graphic({
+      geometry: new Polyline({ paths: [], spatialReference: sr, hasZ: true }),
+      elevationInfo: {mode: "relative-to-scene"},
+      symbol: new SimpleLineSymbol({color: "rgba(0,255,0,0.9)",width: 2})
+    });
+    remainG = new Graphic({
+      geometry: lineG.geometry,
+      elevationInfo: {mode: "relative-to-scene"},
+      symbol: new SimpleLineSymbol({color: "rgba(255,102,0,0.7)",width: 2})
+    });
+    lineLayer.addMany([visitedG,remainG]);
+    initVS(); btnLabel(); updateStats(); densifyAfterBoost(false);
+  }
+
+  /* play / pause / resume */
+  playBtn.onclick=()=> state==="idle"?start():state==="playing"?pause():resume();
+  const start =()=>{densifyAfterBoost(false); idx=0; updateSplit();
+                    state="playing"; btnLabel(); timer=setInterval(frame,FRAME);};
+
+  function updateCoordPanel(point){
+  projection.load().then(()=>{
+    let wgs84 = point;
+    if(point.spatialReference && point.spatialReference.isWebMercator){
+      wgs84 = webMercatorUtils.webMercatorToGeographic(point);
+    } else if(!point.spatialReference.isWGS84){
+      wgs84 = projection.project(point,{wkid:4326});
+    }
+    document.getElementById("latVal").textContent = wgs84.y.toFixed(6);
+    document.getElementById("lonVal").textContent = wgs84.x.toFixed(6);
+    document.getElementById("altVal").textContent = (wgs84.z||0).toFixed(2);
+
+    const total = pts.length;
+    const stepLength = playbackBoost * FRAME / 1000;
+    const travelledMeters = stepLength * idx;
+    const percent = (travelledMeters / (stepLength * total)) * 100;
+    document.getElementById("travelled").textContent = `${travelledMeters.toFixed(1)} (${percent.toFixed(1)}%)`;
+    document.getElementById("totalLen").textContent = (stepLength * total).toFixed(1);
+  });
+}
+  const frame = () => {
+  if (idx >= pts.length) {
+    updateSplit();
+    stop();
+    return;
+  }
+  const currentPoint = pts[idx++];
+  vs.observer = currentPoint;
+  updateSplit();
+  updateCoordPanel(currentPoint); // ← This updates the coordinate UI
+  };
+  
+  const pause =()=>{clearInterval(timer); state="paused"; btnLabel();};
+  const resume=()=>{state="playing"; btnLabel(); timer=setInterval(frame,FRAME);};
+  const stop  =()=>{clearInterval(timer); state="idle"; btnLabel();};
+
+  /* map click → select path */
+  view.on("click",async e=>{
+    const hit=await view.hitTest(e),
+          g  =hit.results.find(r=>r.graphic.layer===pathLayer)?.graphic;
+    if(g){usePath(g);return;}
+    const mp=view.toMap(e); if(!mp)return;
+    const q=pathLayer.createQuery();
+    q.geometry=mp; q.distance=5; q.units="meters"; q.returnGeometry=q.returnZ=true;
+    const r=await pathLayer.queryFeatures(q);
+    if(r.features.length) usePath(r.features[0]);
+  });
+
+  let currentHeading = 0; // store heading in variable for keyboard use
+
+// Update currentHeading whenever joystick is used
+function setHeading(deg) {
+  if (deg < -180) deg += 360;
+  if (deg > 180) deg -= 360;
+  currentHeading = deg; // update tracker
+  headD.textContent = Math.round(deg);
+  if (vs) vs.heading = deg;
+  const rad = deg * Math.PI / 180;
+  dot.style.left = `calc(50% + ${R * Math.sin(rad)}px)`;
+  dot.style.top = `calc(50% + ${-R * Math.cos(rad)}px)`;
+}
+
+window.addEventListener("keydown", (e) => {
+  if (state !== "playing") return; // only allow during playback
+  if (e.key === "ArrowLeft") {
+    e.preventDefault();
+    setHeading(currentHeading - 1); // rotate 2° left
+  } else if (e.key === "ArrowRight") {
+    e.preventDefault();
+    setHeading(currentHeading + 1); // rotate 2° right
+  }
+});
+
+
+
+  /* preview */
+  buildPreview(vsAnal,view);
+  function buildPreview(an,mainView){
+    const box=document.getElementById("previewContainer"),
+          mini=document.createElement("arcgis-scene");
+    mini.setAttribute("item-id","70c8be3f033e4ebf8b4bd566f3cd4a9c");
+    box.appendChild(mini);
+
+    mini.addEventListener("arcgisViewReadyChange",()=>{
+      const pv=mini.view;
+      pv.environment=mainView.environment; pv.ui.components=[];
+      const hide=pv.map.allLayers.find(l=>l.portalItem?.id===PATH_LAYER_ID);
+      if(hide) hide.visible=false;
+      pv.map.allLayers.forEach(l=>{
+        if((l.type==="feature"||l.type==="scene") && l.geometryType==="polygon") l.visible=true;
+      });
+      reactiveUtils.watch(
+        ()=>an.viewsheds.getItemAt(0),
+        v=>{
+          if(!v)return;
+          const upd=()=>pv.camera=new Camera({
+            position:v.observer,heading:v.heading,tilt:v.tilt,
+            fov:Math.hypot(v.horizontalFieldOfView,v.verticalFieldOfView)
+          });
+          upd();
+          reactiveUtils.watch(
+            ()=>[v.observer,v.heading,v.tilt,
+                 v.horizontalFieldOfView,v.verticalFieldOfView],
+            upd,{initial:true}
+          );
+        },{initial:true}
+      );
+    });
+  }
+
+  /* misc */
+  btnLabel(); boostD.textContent=boostS.value;
+  window.addEventListener("blur",pause);
+});
+});
+</script>
+</body>
+</html>
